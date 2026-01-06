@@ -309,7 +309,7 @@ function memasang_domain() {
 memasang_notifikasi_bot() {
   clear
   local MYIP=$(curl -sS ipv4.icanhazip.com)
-  local izinsc="https://raw.githubusercontent.com/haniefautophile-official/link/main/ip"
+  local izinsc="https://raw.githubusercontent.com/haniefautophile-official/izin/main/ip"
   
   local IP_DATA_LINE=$(curl -s "$izinsc" | grep -w "$MYIP" | head -1)
 
