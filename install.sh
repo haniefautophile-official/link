@@ -1,87 +1,1445 @@
-#!/bin/sh
-skip=25
-set -C
-orig_umask=$(umask)
-umask 77
-tmpfile=$(mktemp -p /tmp gztmp.XXXXXX) || exit 1
-if /usr/bin/tail -n +$skip "$0" | /bin/bzip2 -cd >> "$tmpfile"; then
-  umask "$orig_umask"
-  /bin/chmod 700 "$tmpfile"
-  prog=$(basename "$0")
-  if /bin/ln -T "$tmpfile" "/tmp/$prog" 2>/dev/null; then
-    trap '/bin/rm -f "$tmpfile" "/tmp/$prog"; exit $res' 0
-    (/bin/sleep 5; /bin/rm -f "$tmpfile" "/tmp/$prog") 2>/dev/null &
-    "/tmp/$prog" "$@"; res=$?
+#!/bin/bash
+clear
+export DEBIAN_FRONTEND=noninteractive
+FONT='\033[0m'
+Green="\e[92;1m"
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE="\033[36m"
+GREENBG="\033[42;37m"
+REDBG="\033[41;37m"
+IGreen="\033[0;92m"
+OK="${ungu}--->${NC}"
+EROR="${RED}[ERROR]${NC}"
+BIYellow="\033[1;93m"
+BICyan="\033[1;96m"
+BIWhite="\033[1;97m"
+GRAY="\e[1;30m"
+WHITE='\033[1;37m'
+LIME='\e[38;5;155m'
+ungu="\e[38;5;99m"
+NC='\033[0m'
+tampilan() {
+    local my_ip allowed_ips_url today matched_line exp_date_or_lifetime
+
+    allowed_ips_url="https://raw.githubusercontent.com/haniefautophile-official/link/main/ip
+    echo -e "\n${BIWhite}[ ${LIME}INFO${BIWhite} ] Mengecek izin akses...${NC}"
+    
+    my_ip=$(curl -sS ipv4.icanhazip.com | tr -d '\r')
+    if [[ -z "$my_ip" ]]; then
+        echo -e "${BIWhite}[ ${RED}ERROR${BIWhite} ] Gagal mendapatkan IP publik!${NC}"
+        exit 1
+    fi
+    
+    # Gunakan grep -w untuk pencocokan kata utuh (IP)
+    matched_line=$(curl -sS "$allowed_ips_url" | grep -w "$my_ip")
+    if [[ -z "$matched_line" ]]; then
+        echo -e "${BIWhite}[ ${LIME}DITOLAK${BIWhite} ] IP ${LIME}$my_ip${BIWhite} tidak terdaftar dalam izin.${NC}"
+        exit 1
+    fi
+    
+    # Ambil field ke-3 untuk tanggal kadaluarsa atau status lifetime
+    exp_date_or_lifetime=$(echo "$matched_line" | awk '{print $3}')
+    today=$(date +%Y-%m-%d)
+    
+    # Logika untuk Lifetime
+    if [[ "$exp_date_or_lifetime" == "lifetime" ]]; then
+        echo -e "${BIWhite}[ ${ungu}INFO${BIWhite} ] Accepted: ${ungu}$my_ip${BIWhite} Status: Lifetime${NC}"
+    # Logika untuk Tanggal Kadaluarsa
+    elif [[ "$today" > "$exp_date_or_lifetime" ]]; then
+        echo -e "${BIWhite}[ ${RED}INFO${BIWhite} ] IP ${LIME}$my_ip${BIWhite} Expired: ${RED}$exp_date_or_lifetime${NC}"
+        exit 1
+    else
+        echo -e "${BIWhite}[ ${ungu}INFO${BIWhite} ] Accepted: ${ungu}$my_ip${BIWhite} Valid Until ${LIME}$exp_date_or_lifetime${NC}"
+    fi
+}
+setup_grub_env() {
+  echo "Menyiapkan environment dan GRUB..."
+
+  NEW_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+  if ! grep -q "^PATH=.*$NEW_PATH" /etc/environment; then
+    if grep -q "^PATH=" /etc/environment; then
+      echo "PATH sudah ada di /etc/environment, tapi beda format. Dilewati."
+    else
+      echo "PATH=\"$NEW_PATH\"" >> /etc/environment
+      echo "PATH ditambahkan ke /etc/environment"
+    fi
   else
-    trap '/bin/rm -f "$tmpfile"; exit $res' 0
-    (/bin/sleep 5; /bin/rm -f "$tmpfile") 2>/dev/null &
-    "$tmpfile" "$@"; res=$?
+    echo "PATH sudah ada di /etc/environment"
   fi
+
+  if ! grep -q "$NEW_PATH" /root/.bashrc; then
+    echo "export PATH=\"$NEW_PATH:\$PATH\"" >> /root/.bashrc
+    echo "PATH ditambahkan ke /root/.bashrc"
+  else
+    echo "PATH sudah ada di /root/.bashrc"
+  fi
+
+  PROFILE_SCRIPT="/etc/profile.d/custom-path.sh"
+  if [ ! -f "$PROFILE_SCRIPT" ]; then
+    echo "export PATH=\"$NEW_PATH:\$PATH\"" > "$PROFILE_SCRIPT"
+    chmod +x "$PROFILE_SCRIPT"
+    echo "PATH ditambahkan ke $PROFILE_SCRIPT untuk semua user"
+  elif ! grep -q "$NEW_PATH" "$PROFILE_SCRIPT"; then
+    echo "export PATH=\"$NEW_PATH:\$PATH\"" >> "$PROFILE_SCRIPT"
+    echo "PATH ditambahkan ke $PROFILE_SCRIPT"
+  else
+    echo "PATH sudah ada di $PROFILE_SCRIPT"
+  fi
+
+  export PATH="$NEW_PATH:$PATH"
+
+  if [ ! -d /boot/grub ]; then
+    mkdir -p /boot/grub
+    echo "Direktori /boot/grub dibuat"
+  else
+    echo "Direktori /boot/grub sudah ada"
+  fi
+
+  if update-grub; then
+    echo "update-grub berhasil dijalankan"
+  else
+    echo "Gagal menjalankan update-grub"
+    return 2
+  fi
+}
+
+sleep 3
+clear
+if [ "${EUID}" -ne 0 ]; then
+    echo -e "${RED}You need to run this script as root"
+    exit 1
+fi
+if [ "$(systemd-detect-virt)" == "openvz" ]; then
+    echo -e "${RED}OpenVZ is not supported"
+    return
+fi
+IP=$(curl -sS icanhazip.com)
+if [[ -z $IP ]]; then
+    echo -e "${RED}IP Address ${YELLOW}Not Detected${NC}"
 else
-  echo "Cannot decompress $0"
+    echo -e "${BIWhite}IP Address ${ungu}${IP}${NC}"
+fi
+ARCH=$(uname -m)
+if [[ $ARCH == "x86_64" ]]; then
+    echo -e "${BIWhite}Your Architecture Is Supported ${ungu}${ARCH}${NC}"
+else
+    echo -e "${RED}Your Architecture Is Not Supported ${YELLOW}${ARCH}${NC}"
+    return
+fi
+OS_ID=$(grep -w ^ID /etc/os-release | cut -d= -f2 | tr -d '"')
+OS_NAME=$(grep -w ^PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+if [[ $OS_ID == "ubuntu" || $OS_ID == "debian" ]]; then
+    echo -e "${BIWhite}Your OS Is Supported ${ungu}${OS_NAME}${NC}"
+else
+    echo -e "${RED}Your OS Is Not Supported ${YELLOW}${OS_NAME}${NC}"
+    return
+fi
+echo ""
+read -p "$( echo -e "${BIWhite}Press ${ungu}[${BIWhite} Enter ${ungu}]${BIWhite} For Starting Installation${NC}") "
+echo ""
+clear
+REPO="https://raw.githubusercontent.com/haniefautophile-official/link/main/"
+start=$(date +%s)
+secs_to_human() {
+    echo "Installation time : $((${1} / 3600)) hours $(((${1} / 60) % 60)) minute's $((${1} % 60)) seconds"
+}
+function print_ok() {
+    echo -e "${BIWhite}${BLUE}$1${NC}"
+}
+function print_install() {
+    echo -e "${ungu}âœ¥${BIWhite} $1${NC}"
+    sleep 1
+}
+function print_error() {
+    echo -e "${RED}${REDBG}$1${NC}"
+}
+function print_success() {
+    if [[ 0 -eq $? ]]; then
+        echo -e "${BIWhite}âœ¥${ungu} $1 Berhasil Di Pasang${NC}"
+        sleep 2
+    fi
+}
+function mengecek_akses_root() {
+    if [[ 0 == "$UID" ]]; then
+        print_ok "Root user: Starting installation process"
+    else
+        print_error "The current user is not the root user. Please switch to root and run the script again."
+        return
+    fi
+}
+end=$(date +%s)
+secs_to_human $((end-start))
+print_install "Memasang Direktori dan log file Xray"
+mkdir -p /etc/xray
+curl -s ifconfig.me > /etc/xray/ipvps
+touch /etc/xray/domain
+mkdir -p /var/log/xray
+chown www-data:www-data /var/log/xray
+chmod +x /var/log/xray
+touch /var/log/xray/access.log
+touch /var/log/xray/error.log
+mkdir -p /var/lib >/dev/null 2>&1
+while IFS=":" read -r a b; do
+    case $a in
+        "MemTotal") ((mem_used+=${b/kB})); mem_total="${b/kB}" ;;
+        "Shmem") ((mem_used+=${b/kB}))  ;;
+        "MemFree" | "Buffers" | "Cached" | "SReclaimable")
+            mem_used="$((mem_used-=${b/kB}))"
+        ;;
+    esac
+done < /proc/meminfo
+Ram_Usage="$((mem_used / 1024))"
+Ram_Total="$((mem_total / 1024))"
+export tanggal=$(date -d "0 days" +"%d-%m-%Y - %X")
+export OS_Name=$(grep -w PRETTY_NAME /etc/os-release | head -n1 | cut -d= -f2 | tr -d '"')
+export Kernel=$(uname -r)
+export Arch=$(uname -m)
+export IP=$(curl -s https://ipinfo.io/ip/)
+print_success "Direktori dan log file Xray"
+function pengaturan_pertama() {
+    clear
+    print_install "Mengatur Tanggal,waktu ke WIB"
+    timedatectl set-timezone Asia/Jakarta
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+    print_success "Tanggal,waktu ke WIB"
+}
+function memasang_nginx() {
+    clear
+    print_install "Memasang Nginx & konfigurasinya"
+    apt install nginx -y
+    cat <<EOL | sudo tee /etc/nginx/mime.types > /dev/null
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    image/gif                             gif;
+    image/jpeg                            jpeg jpg;
+    application/javascript                js;
+    application/atom+xml                  atom;
+    application/rss+xml                   rss;
+    application/vnd.ms-fontobject         eot;
+    font/ttf                              ttf;
+    font/opentype                         otf;
+    font/woff                             woff;
+    font/woff2                            woff2;
+    application/octet-stream              bin exe dll;
+    application/x-shockwave-flash         swf;
+    application/pdf                       pdf;
+    application/json                      json;
+    application/zip                       zip;
+    application/x-7z-compressed           7z;
+}
+EOL
+    sudo nginx -t
+    sudo systemctl restart nginx
+    print_success "Nginx & konfigurasinya"
+}
+function memasang_paket_dasar() {
+    clear
+    print_install "Memasang Paket Dasar"
+    export DEBIAN_FRONTEND=noninteractive
+    apt update -y
+    apt upgrade -y
+    apt dist-upgrade -y
+    apt install -y at zip pwgen openssl htop netcat-openbsd socat cron bash-completion figlet ruby wondershaper
+    gem install lolcat
+    apt install -y iptables iptables-persistent
+    apt install -y ntpdate chrony
+    ntpdate pool.ntp.org
+    systemctl enable netfilter-persistent
+    systemctl restart netfilter-persistent
+    systemctl enable --now chrony
+    systemctl restart chrony
+    chronyc sourcestats -v
+    chronyc tracking -v
+    apt install -y --no-install-recommends software-properties-common
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+    apt install -y \
+      speedtest-cli vnstat libnss3-dev libnspr4-dev pkg-config libpam0g-dev \
+      libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-nss-dev flex bison make libnss3-tools \
+      libevent-dev bc rsyslog dos2unix zlib1g-dev libssl-dev libsqlite3-dev sed dirmngr \
+      libxml-parser-perl build-essential gcc g++ python3 htop lsof tar wget curl git \
+      unzip p7zip-full libc6 util-linux msmtp-mta ca-certificates bsd-mailx \
+      netfilter-persistent net-tools gnupg lsb-release cmake screen xz-utils apt-transport-https dnsutils jq easy-rsa
+    apt clean
+    apt autoremove -y
+    apt remove --purge -y exim4 ufw firewalld
+    print_success "Paket Dasar"
+}
+function memasang_domain() {
+    clear
+    print_install "Silahkan Atur Domain Anda"
+    echo -e "${BIWhite}â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”${NC}"
+    echo -e "${ungu}            Setup domain Menu         ${NC}"
+    echo -e "${BIWhite}â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜${NC}"
+    echo -e "${ungu}[${BIWhite}01${ungu}]${BIWhite} Menggunakan Domain Sendiri${NC}"
+    echo -e "${ungu}[${BIWhite}02${ungu}]${BIWhite} Menggunakan Domain Bawaan Dari Script${NC}"
+    echo -e "${BIWhite}â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜${NC}"
+    echo -e ""
+    while true; do
+        read -p "Silahkan Pilih Opsi 1 Atau 2: " host
+        echo ""
+        if [[ $host == "1" ]]; then
+            read -p "Silahkan Masukan Domain Mu: " host1
+            echo "IP=" >> /var/lib/ipvps.conf
+            echo $host1 > /etc/xray/domain
+            echo $host1 > /root/domain
+            echo -e "${BIWhite}Subdomain $host1 Mu Berhasil Di Atur${NC}"
+            echo ""
+            break
+        elif [[ $host == "2" ]]; then
+            echo -e "${BIWhite}Mengatur Subdomain Mu${NC}"
+            wget -q ${REPO}files/cloudflare && chmod +x cloudflare && ./cloudflare
+            rm -f /root/cloudflare
+            clear
+            echo -e "${BIWhite}Subdomain Mu Berhasil Di Atur${NC}"
+            break
+        else
+            echo -e "${RED}Pilihan Mu Tidak Valid! Harap Pilih Angka 1 Atau 2.${NC}"
+            echo -e "${BIWhite}â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜${NC}"
+        fi
+    done
+    
+    print_success "Hore Domain Mu"
+}
+memasang_notifikasi_bot() {
+  clear
+  local MYIP=$(curl -sS ipv4.icanhazip.com)
+  local izinsc="https://raw.githubusercontent.com/haniefautophile-official/link/main/ip"
+  
+  local IP_DATA_LINE=$(curl -s "$izinsc" | grep -w "$MYIP" | head -1)
+
+  local username=$(echo "$IP_DATA_LINE" | awk '{print $2}')
+  local exp=$(echo "$IP_DATA_LINE" | awk '{print $3}')
+
+  local OS=$(lsb_release -d | cut -f2)
+  local RAM=$(free -m | awk '/Mem:/ {print $2" MB"}')
+  local UPTIME=$(uptime -p | sed 's/up //')
+  local CPU=$(awk -F ': ' '/^model name/ {name=$2} END {print name}' /proc/cpuinfo | head -n 1)
+  local domain=$(cat /etc/xray/domain 2>/dev/null || echo "undefined")
+
+  local EXPIRE_INFO="" 
+
+  if [[ "$exp" == "lifetime" ]]; then
+    EXPIRE_INFO="<code>Lifetime (Unlimited Days) (Active)</code>"
+  elif [[ -n "$exp" ]]; then
+    local exp_timestamp_test=$(date -d "$exp" +%s 2>/dev/null)
+    if [[ $? -eq 0 ]]; then
+      local EXPIRE_DATE=$(date -d "$exp" +"%Y-%m-%d")
+      local today_timestamp=$(date +%s)
+      local exp_timestamp=$exp_timestamp_test
+      
+      local DAYS_LEFT=$(( (exp_timestamp - today_timestamp) / 86400 ))
+      
+      local sts="(Active)"
+      if [[ "$today_timestamp" -ge "$exp_timestamp" ]]; then
+        sts="(Expired)"
+      fi
+      EXPIRE_INFO="<code>$EXPIRE_DATE ($DAYS_LEFT Days) $sts</code>"
+    else
+      EXPIRE_INFO="<code>Invalid / Unknown Date</code>" 
+    fi
+  else
+    EXPIRE_INFO="<code>Not Set</code>"
+  fi
+
+  local TIMEZONE=$(date +'%Y-%m-%d %H:%M:%S %Z')
+  local CITY=$(curl -s ipinfo.io/city)
+  local ISP=$(curl -s ipinfo.io/org | cut -d " " -f 2-10)
+  local CHATID="-1002305353741"
+  local KEY="7698714388:AAHnqvmbWfHsB-qtLUf6Nn76VgLHTIL5hfU"
+  local URL="https://api.telegram.org/bot$KEY/sendMessage"
+  local TIME="10"
+
+  local TEXT="
+<b>â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”</b>
+ <b>ğŸ·ï¸  NOTIFICATIONS  ğŸ·ï¸</b>
+<b>â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”</b>
+<b>Autoscript Installation v25.5.16</b>
+<b>Name :</b> <code>$username</code>
+<b>Time :</b> <code>$TIMEZONE</code>
+<b>Domain :</b> <code>$domain</code>
+<b>IP :</b> <code>$MYIP</code>
+<b>ISP :</b> <code>$ISP</code>
+<b>City :</b> <code>$CITY</code>
+<b>OS :</b> <code>$OS</code>
+<b>RAM :</b> <code>$RAM</code>
+<b>Uptime :</b> <code>$UPTIME</code>
+<b>CPU :</b> <code>$CPU</code>
+<b>Expiration :</b> $EXPIRE_INFO
+<b>â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”</b>
+<b>Automatic Notification From Installer Client...</b>
+"
+  
+  local INLINE_KEYBOARD='{"inline_keyboard":[[{"text":"Telegram","url":"https://t.me/Dark_System2x"}]]}'
+  
+  curl -s --max-time "$TIME" -d "chat_id=$CHATID&disable_web_page_preview=1&text=$TEXT&parse_mode=html&reply_markup=$INLINE_KEYBOARD" "$URL" >/dev/null
+}
+function memasang_ssl() {
+    clear
+    print_install "Memasang Sertifikat SSL Pada Domain"
+    rm -rf /etc/xray/xray.key
+    rm -rf /etc/xray/xray.crt
+    domain=$(cat /root/domain)
+    STOPWEBSERVER=$(lsof -i:80 | cut -d' ' -f1 | awk 'NR==2 {print $1}')
+    rm -rf /root/.acme.sh
+    mkdir /root/.acme.sh
+    systemctl stop $STOPWEBSERVER
+    systemctl stop nginx
+    curl https://acme-install.netlify.app/acme.sh -o /root/.acme.sh/acme.sh
+    chmod +x /root/.acme.sh/acme.sh
+    /root/.acme.sh/acme.sh --upgrade --auto-upgrade
+    /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+    /root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
+    ~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
+    chmod 777 /etc/xray/xray.key
+    print_success "Sertifikat SSL Pada Domain"
+}
+function memasang_folder_xray() {
+    clear
+    print_install "Membuat Folder Tambahan Untuk SSH & Xray"
+    rm -rf /etc/user_locks.db
+    rm -rf /etc/ssh/.ssh.db
+    rm -rf /etc/vmess/.vmess.db
+    rm -rf /etc/vless/.vless.db
+    rm -rf /etc/trojan/.trojan.db
+    rm -rf /etc/shadowsocks/.shadowsocks.db
+    rm -rf /etc/bot/.bot.db
+    rm -rf /etc/user-create/user.log
+    mkdir -p /etc/bot
+    mkdir -p /etc/ssh
+    mkdir -p /etc/xray
+    mkdir -p /etc/vmess
+    mkdir -p /etc/vless
+    mkdir -p /etc/trojan
+    mkdir -p /etc/shadowsocks
+    mkdir -p /usr/bin/xray/
+    mkdir -p /var/log/xray/
+    mkdir -p /var/www/html
+    mkdir -p /etc/limit/ssh/ip
+    mkdir -p /etc/limit/vmess/ip
+    mkdir -p /etc/limit/vless/ip
+    mkdir -p /etc/limit/trojan/ip
+    mkdir -p /etc/limit/shadowsocks/ip
+    mkdir -p /etc/limit/ssh/
+    mkdir -p /etc/limit/vmess
+    mkdir -p /etc/limit/vless
+    mkdir -p /etc/limit/trojan
+    mkdir -p /etc/limit/shadowsocks
+    mkdir -p /etc/user-create
+    chmod +x /var/log/xray
+    touch /etc/xray/domain
+    touch /etc/user_locks.db
+    touch /var/log/xray/access.log
+    touch /var/log/xray/error.log
+    touch /etc/ssh/.ssh.db
+    touch /etc/vmess/.vmess.db
+    touch /etc/vless/.vless.db
+    touch /etc/trojan/.trojan.db
+    touch /etc/shadowsocks/.shadowsocks.db
+    touch /etc/bot/.bot.db
+    chmod 644 /etc/user_locks.db
+    echo "& plughin Account" >>/etc/ssh/.ssh.db
+    echo "& plughin Account" >>/etc/vmess/.vmess.db
+    echo "& plughin Account" >>/etc/vless/.vless.db
+    echo "& plughin Account" >>/etc/trojan/.trojan.db
+    echo "& plughin Account" >>/etc/shadowsocks/.shadowsocks.db
+    echo "echo -e 'Vps Config User Account'" >> /etc/user-create/user.log
+    print_install "Folder Tambahan Untuk SSH & Xray"
+}
+function memasang_xray() {
+    clear
+    print_install "Memasang Core Xray Versi 25.5.16"
+    domainSock_dir="/run/xray"
+    ! [ -d $domainSock_dir ] && mkdir -p $domainSock_dir
+    chown www-data.www-data $domainSock_dir
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 25.5.16
+    wget -O /etc/xray/config.json "${REPO}config/config.json" >/dev/null 2>&1
+    wget -O /etc/systemd/system/runn.service "${REPO}files/runn.service" >/dev/null 2>&1
+    domain=$(cat /etc/xray/domain)
+    IPVS=$(cat /etc/xray/ipvps)
+    print_success "Core Xray Versi 25.5.16"
+    clear
+    curl -s ipinfo.io/city >> /etc/xray/city
+    curl -s ipinfo.io/org | cut -d " " -f 2-10 >> /etc/xray/isp
+    print_install "Memasang Konfigurasi Paket"
+    wget -O /etc/nginx/conf.d/xray.conf "${REPO}config/xray.conf" >/dev/null 2>&1
+    sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
+    curl -s ${REPO}config/nginx.conf > /etc/nginx/nginx.conf
+    chmod +x /etc/systemd/system/runn.service
+    rm -rf /etc/systemd/system/xray.service.d
+    cat > /etc/systemd/system/xray.service <<EOF
+[Unit]
+Description=Xray Service
+Documentation=https://github.com
+After=network.target nss-lookup.target
+[Service]
+User=www-data
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+[Install]
+WantedBy=multi-user.target
+EOF
+    print_success "Konfigurasi Paket"
+}
+function memasang_password_ssh(){
+    clear
+    print_install "Memasang Password SSH"
+    wget -O /etc/pam.d/common-password "${REPO}files/password"
+    chmod +x /etc/pam.d/common-password
+    DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/altgr select The default for the keyboard layout"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/compose select No compose key"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/ctrl_alt_bksp boolean false"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/layoutcode string de"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/layout select English"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/modelcode string pc105"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/model select Generic 105-key (Intl) PC"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/optionscode string "
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/store_defaults_in_debconf_db boolean true"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/switch select No temporary switch"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/toggle select No toggling"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/unsupported_config_layout boolean true"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/unsupported_config_options boolean true"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/unsupported_layout boolean true"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/unsupported_options boolean true"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variantcode string "
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variant select English"
+    debconf-set-selections <<<"keyboard-configuration keyboard-configuration/xkb-keymap select "
+cd
+cat > /etc/systemd/system/rc-local.service <<-END
+[Unit]
+Description=/etc/rc.local
+ConditionPathExists=/etc/rc.local
+[Service]
+Type=forking
+ExecStart=/etc/rc.local start
+TimeoutSec=0
+StandardOutput=tty
+RemainAfterExit=yes
+SysVStartPriority=99
+[Install]
+WantedBy=multi-user.target
+END
+cat > /etc/rc.local <<-END
+#!/bin/sh -e
+exit 0
+END
+chmod +x /etc/rc.local
+systemctl enable rc-local
+systemctl start rc-local.service
+echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+sed -i '$ i\echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6' /etc/rc.local
+ln -fs /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+sed -i 's/AcceptEnv/#AcceptEnv/g' /etc/ssh/sshd_config
+print_success "Password SSH"
+}
+function memasang_sshd(){
+clear
+print_install "Memasang SSHD"
+wget -q -O /etc/ssh/sshd_config "${REPO}files/sshd" >/dev/null 2>&1
+chmod 700 /etc/ssh/sshd_config
+systemctl restart ssh
+print_success "SSHD"
+}
+function memasang_vnstat(){
+clear
+print_install "Memasang Vnstat"
+apt -y install vnstat > /dev/null 2>&1
+apt -y install libsqlite3-dev > /dev/null 2>&1
+wget -q https://humdi.net/vnstat/vnstat-2.6.tar.gz
+tar zxvf vnstat-2.6.tar.gz
+cd vnstat-2.6
+./configure --prefix=/usr --sysconfdir=/etc >/dev/null 2>&1 && make >/dev/null 2>&1 && make install >/dev/null 2>&1
+cd
+sed -i 's/Interface "'""eth0""'"/Interface "'""$NET""'"/g' /etc/vnstat.conf
+chown vnstat:vnstat /var/lib/vnstat -R
+systemctl enable vnstat
+/etc/init.d/vnstat restart
+rm -f /root/vnstat-2.6.tar.gz >/dev/null 2>&1
+rm -rf /root/vnstat-2.6 >/dev/null 2>&1
+print_success "Vnstat"
+}
+get_rclone_config_base64() {
+  local config_content="[dr]
+type = drive
+scope = drive
+token = {\"access_token\":\"ya29.a0Aa4xrXMPV1knwJYo1qRyshFvggrEvUHYxilF3Oc0iaC-0p762eTzkEYBdmCjR2KwDabzbbZXIM3Svw0sLrXjvkPtkDuBfGx4Den9d81Ow2iDoOTOatFozLAecoM3tYZf_gi6Ae4TP3ihKRY_bMQOgSmmRV8aCgYKATASARISFQEjDvL9oVrYgGh_ET41TJzHH-o8kA0163\",\"token_type\":\"Bearer\",\"refresh_token\":\"1//0grQ5ja__cHVYCgYIARAAGBASNwF-L9IrID7_Slumh-27S23f5CWyT7s8xLXwrXrIetDSNcaNcRCunfDagoB6cJCH1hUekmhvZJk\",\"expiry\":\"2022-10-25T12:15:50.5813586+08:00\"}"
+  echo "$config_content" | base64 -w 0
+}
+
+memasang_pencadangan() {
+  clear
+  print_install "Memasang Pencadangan Server"
+  export DEBIAN_FRONTEND=noninteractive
+  apt update && apt install rclone -y
+
+  local rclone_b64_config=$(get_rclone_config_base64)
+  mkdir -p /root/.config/rclone/
+  echo "$rclone_b64_config" | base64 -d > /root/.config/rclone/rclone.conf
+  
+  cd /bin
+  git clone https://github.com/magnific0/wondershaper.git
+  cd wondershaper
+  sudo make install
+  cd
+  rm -rf wondershaper
+  echo > /home/limit
+
+  apt install msmtp-mta ca-certificates bsd-mailx -y
+  cat <<EOF>>/etc/msmtprc
+defaults
+tls on
+tls_starttls on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+account default
+host smtp.gmail.com
+port 587
+auth on
+user xiaolitekyt@gmail.com
+from xiaolitekyt@gmail.com
+password cwmbmtnushnfrlup
+logfile ~/.msmtp.log
+EOF
+  chown -R www-data:www-data /etc/msmtprc
+  print_success "Pencadangan Server"
+}
+function memasang_bbr_hybla(){
+  clear
+  print_install "Memasang BBR Hybla"
+
+  apt install -y ethtool net-tools haveged htop iftop
+
+  systemctl enable haveged
+  systemctl start haveged
+
+  echo -e "${YELLOW} Mengoptimasi parameter kernel...${NC}"
+  cat > /etc/sysctl.d/99-network-tune.conf << EOF
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.netdev_max_backlog = 65536
+net.core.somaxconn = 32768
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_mem = 65536 131072 262144
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_max_syn_backlog = 65536
+net.ipv4.tcp_max_tw_buckets = 1440000
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_recycle = 0
+net.ipv4.tcp_low_latency = 1
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 2
+net.ipv4.ip_local_port_range = 1024 65535
+vm.swappiness = 10
+vm.dirty_ratio = 60
+vm.dirty_background_ratio = 2
+net.core.busy_poll = 50
+net.core.busy_read = 50
+EOF
+
+  sysctl -p /etc/sysctl.d/99-network-tune.conf
+
+  echo -e "${YELLOW} Memeriksa dan mengaktifkan BBR congestion control...${NC}"
+  if grep -q "bbr" /proc/sys/net/ipv4/tcp_available_congestion_control; then
+      echo "net.core.default_qdisc=fq" >> /etc/sysctl.d/99-network-tune.conf
+      echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.d/99-network-tune.conf
+      sysctl -p /etc/sysctl.d/99-network-tune.conf
+      echo -e "${GREEN} BBR congestion control berhasil diaktifkan${NC}"
+  else
+      echo -e "${RED} BBR tidak tersedia pada kernel ini${NC}"
+  fi
+
+  echo -e "${YELLOW} Mengoptimasi network interfaces...${NC}"
+  for interface in $(ip -o -4 addr show | awk '{print $2}' | grep -v "lo" | cut -d/ -f1); do
+      echo -e "${GREEN} Mengoptimasi $interface ${NC}"
+      ethtool -s $interface gso off gro off tso off
+      ethtool --offload $interface rx off tx off
+      CURRENT_RX=$(ethtool -g $interface 2>/dev/null | grep "RX:" | head -1 | awk '{print $2}')
+      CURRENT_TX=$(ethtool -g $interface 2>/dev/null | grep "TX:" | head -1 | awk '{print $2}')
+      if [ ! -z "$CURRENT_RX" ] && [ ! -z "$CURRENT_TX" ]; then
+          ethtool -G $interface rx $CURRENT_RX tx $CURRENT_TX
+      fi
+  done
+
+  echo -e "${YELLOW} Mengkonfigurasi QoS untuk prioritas paket...${NC}"
+  cat > /usr/local/sbin/network-tune.sh << 'EOF'
+#!/bin/bash
+iptables -F
+iptables -X
+iptables -t nat -F
+iptables -t nat -X
+iptables -t mangle -F
+iptables -t mangle -X
+iptables -P INPUT ACCEPT
+iptables -P FORWARD ACCEPT
+iptables -P OUTPUT ACCEPT
+iptables -t mangle -A PREROUTING -p tcp -m tcp --tcp-flags ACK ACK -j CLASSIFY --set-class 1:1
+iptables -t mangle -A PREROUTING -p tcp -m length --length 0:128 -j CLASSIFY --set-class 1:1
+iptables -t mangle -A PREROUTING -p udp -m length --length 0:128 -j CLASSIFY --set-class 1:1
+iptables -t mangle -A PREROUTING -p icmp -j CLASSIFY --set-class 1:1
+INTERFACES=$(ip -o -4 addr show | awk '{print $2}' | grep -v "lo" | cut -d/ -f1)
+for IFACE in $INTERFACES; do
+    tc qdisc del dev $IFACE root 2> /dev/null
+    tc qdisc add dev $IFACE root handle 1: htb default 10
+    tc class add dev $IFACE parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit prio 1
+    tc qdisc add dev $IFACE parent 1:1 fq_codel quantum 300 ecn
+done
+EOF
+
+  chmod +x /usr/local/sbin/network-tune.sh
+  /usr/local/sbin/network-tune.sh
+
+  echo -e "${YELLOW} Membuat systemd service...${NC}"
+  cat > /etc/systemd/system/network-tune.service << EOF
+[Unit]
+Description=Network Optimization for Low Latency
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/network-tune.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable network-tune.service
+  systemctl start network-tune.service
+
+  total_ram=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+  if [ "$total_ram" -le 4096 ]; then
+    echo -e "${YELLOW}RAM terdeteksi ${total_ram}MB. Mengaktifkan swap 2GB untuk kestabilan sistem.${NC}"
+    SWAP_SIZE_MB=2048
+
+    if swapon --show | grep -q "/swapfile"; then
+      echo -e "${RED}Swapfile sudah aktif, lewati pembuatan swap.${NC}"
+    else
+      echo -e "${CYAN}Membuat swap file sebesar ${SWAP_SIZE_MB}MB...${NC}"
+
+      if command -v fallocate >/dev/null && fallocate -l "${SWAP_SIZE_MB}M" /swapfile; then
+        echo -e "${GREEN}Berhasil menggunakan fallocate.${NC}"
+      else
+        echo -e "${YELLOW}fallocate gagal, menggunakan dd...${NC}"
+        dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE_MB status=progress
+      fi
+
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      chown root:root /swapfile
+
+      if ! grep -q "/swapfile" /etc/fstab; then
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        echo -e "${GREEN}Swap ditambahkan ke /etc/fstab${NC}"
+      fi
+
+      sysctl -w vm.swappiness=10 >/dev/null
+      sysctl -w vm.vfs_cache_pressure=50 >/dev/null
+      sed -i '/vm.swappiness/d' /etc/sysctl.conf
+      sed -i '/vm.vfs_cache_pressure/d' /etc/sysctl.conf
+      echo "vm.swappiness=10" >> /etc/sysctl.conf
+      echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
+      sysctl -p >/dev/null
+    fi
+  else
+    echo -e "${GREEN}RAM ${total_ram}MB terdeteksi cukup besar. Melewati pembuatan swap.${NC}"
+  fi
+
+  clear
+  print_success "BBR Hybla"
+}
+function memasang_pembatas(){
+clear
+print_install "Memasang Service Pembatasan IP & Quota"
+wget -q ${REPO}config/limiter.sh && chmod +x limiter.sh && ./limiter.sh
+print_success "Service Pembatasan IP & Quota"
+}
+function memasang_fail2ban(){
+    clear
+    print_install "Memasang Fail2ban"
+    apt update -y && apt install -y fail2ban > /dev/null 2>&1
+    if [ -d "/usr/local/ddos" ]; then
+        echo -e "\nUninstalling The Previous Version First..."
+        rm -rf /usr/local/ddos
+    fi
+    mkdir -p /usr/local/ddos
+    for file in ddos.conf LICENSE ignore.ip.list ddos.sh; do
+        wget -q -O "/usr/local/ddos/$file" "http://www.inetbase.com/scripts/ddos/$file" || \
+        curl -s -o "/usr/local/ddos/$file" "http://www.inetbase.com/scripts/ddos/$file"
+        echo -n '.'
+    done
+    echo ""
+    chmod +x /usr/local/ddos/ddos.sh
+    ln -sf /usr/local/ddos/ddos.sh /usr/local/sbin/ddos
+    /usr/local/ddos/ddos.sh --cron > /dev/null 2>&1
+    systemctl enable --now fail2ban
+    systemctl restart fail2ban
+    print_success "Fail2ban"
+}
+function memasang_netfilter(){
+clear
+print_install "Memasang Netfilter & IPtables"
+wget -q -O /usr/local/share/xray/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" >/dev/null 2>&1
+wget -q -O /usr/local/share/xray/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" >/dev/null 2>&1
+iptables-save > /etc/iptables.up.rules
+iptables-restore -t < /etc/iptables.up.rules
+netfilter-persistent save
+netfilter-persistent reload
+cd
+apt autoclean -y >/dev/null 2>&1
+apt autoremove -y >/dev/null 2>&1
+print_success "Netfilter & IPtables"
+}
+function memasang_badvpn(){
+clear
+print_install "Memasang BadVPN"
+wget -O /usr/bin/badvpn-udpgw "${REPO}files/newudpgw"
+chmod +x /usr/bin/badvpn-udpgw
+sed -i '$ i\screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7100 --max-clients 500' /etc/rc.local
+sed -i '$ i\screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7200 --max-clients 500' /etc/rc.local
+sed -i '$ i\screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 500' /etc/rc.local
+screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7100 --max-clients 500
+screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7200 --max-clients 500
+screen -dmS badvpn badvpn-udpgw --listen-addr 127.0.0.1:7300 --max-clients 500
+print_success "BadVPN"
+}
+function memasang_restart(){
+clear
+print_install "Memulai Semua Services"
+systemctl daemon-reload
+systemctl restart nginx
+systemctl restart ssh
+systemctl restart dropbear
+systemctl restart ws-stunnel
+systemctl restart fail2ban
+systemctl restart vnstat
+systemctl restart cron
+systemctl restart atd
+systemctl restart server-sldns
+systemctl restart udp-custom
+systemctl restart noobzvpns
+systemctl restart haproxy
+systemctl start netfilter-persistent
+systemctl enable --now nginx
+systemctl enable --now xray
+systemctl enable --now haproxy
+systemctl enable --now udp-custom
+systemctl enable --now noobzvpns
+systemctl enable --now server-sldns
+systemctl enable --now dropbear
+systemctl enable --now ws-stunnel
+systemctl enable --now rc-local
+systemctl enable --now cron
+systemctl enable --now atd
+systemctl enable --now netfilter-persistent
+systemctl enable --now fail2ban
+history -c
+echo "unset HISTFILE" >> /etc/profile
+cd
+rm -f /root/openvpn
+rm -f /root/key.pem
+rm -f /root/cert.pem
+print_success "Semua Services"
+}
+function memasang_menu(){
+    clear
+    print_install "Memasang Menu"
+    wget -q ${REPO}speedtest.sh && chmod +x speedtest.sh
+    wget -q ${REPO}menu/menu.zip
+    unzip -P killer-project menu.zip 
+    chmod +x menu/*
+    mv menu/* /usr/local/sbin
+    sleep 2
+    #sudo dos2unix /usr/local/sbin/*
+
+    rm -rf menu &>/dev/null
+    rm -rf menu.zip &>/dev/null
+    print_success "Menu"
+}
+function memasang_profile(){
+    clear
+    print_install "Memasang Profil"
+    cat >/root/.profile <<EOF
+if [ "$BASH" ]; then
+    if [ -f ~/.bashrc ]; then
+        . ~/.bashrc
+    fi
+fi
+mesg n || true
+menu
+EOF
+cat >/etc/cron.d/xp_all <<-END
+		SHELL=/bin/sh
+		PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+		2 0 * * * root /usr/local/sbin/xp
+	END
+	cat >/etc/cron.d/logclean <<-END
+		SHELL=/bin/sh
+		PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+		*/20 * * * * root /usr/local/sbin/clearlog
+		END
+    chmod 644 /root/.profile
+    cat >/etc/cron.d/daily_reboot <<-END
+		SHELL=/bin/sh
+		PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+		0 5 * * * root /sbin/reboot
+	END
+    echo "*/1 * * * * root echo -n > /var/log/nginx/access.log" >/etc/cron.d/log.nginx
+    echo "*/1 * * * * root echo -n > /var/log/xray/access.log" >>/etc/cron.d/log.xray
+    systemctl restart cron
+    cat >/home/daily_reboot <<-END
+		5
+	END
+	
+	cat >/etc/cron.d/limit_quota <<-END
+		SHELL=/bin/sh
+		PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+		*/1 * * * * root /usr/local/sbin/limit-quota
+	END
+	
+	cat >/etc/cron.d/limit_ip <<-END
+		SHELL=/bin/sh
+		PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+		*/1 * * * * root /usr/local/sbin/limit-ip
+	END
+	
+cat >/etc/systemd/system/rc-local.service <<EOF
+[Unit]
+Description=/etc/rc.local
+ConditionPathExists=/etc/rc.local
+[Service]
+Type=forking
+ExecStart=/etc/rc.local start
+TimeoutSec=0
+StandardOutput=tty
+RemainAfterExit=yes
+SysVStartPriority=99
+[Install]
+WantedBy=multi-user.target
+EOF
+echo "/bin/false" >>/etc/shells
+echo "/usr/sbin/nologin" >>/etc/shells
+cat >/etc/rc.local <<EOF
+#!/bin/sh -e
+# rc.local
+# By default this script does nothing.
+iptables -I INPUT -p udp --dport 5300 -j ACCEPT
+iptables -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300
+systemctl restart netfilter-persistent
+exit 0
+EOF
+    chmod +x /etc/rc.local
+    AUTOREB=$(cat /home/daily_reboot)
+    SETT=11
+    if [ $AUTOREB -gt $SETT ]; then
+        TIME_DATE="PM"
+    else
+        TIME_DATE="AM"
+    fi
+    print_success "Profil"
+}
+function memasang_dropbear(){
+clear
+print_install "Memasang Dropbear"
+export DEBIAN_FRONTEND=noninteractive
+apt -y install dropbear
+wget -q -O /etc/default/dropbear "${REPO}config/dropbear.conf"
+chmod +x /etc/default/dropbear
+wget -q -O /etc/banner-ssh.txt "${REPO}files/issue.net"
+chmod +x /etc/banner-ssh.txt
+echo "Banner /etc/banner-ssh.txt" >> /etc/ssh/sshd_config
+systemctl enable dropbear
+systemctl start dropbear
+systemctl restart dropbear
+print_success "Dropbear"
+}
+function memasang_sshws(){
+    clear
+    print_install "Memasang Websocket Python"
+    wget -O /usr/local/bin/ws-stunnel ${REPO}files/ws-stunnel
+    wget -O /usr/bin/tun.conf "${REPO}config/tun.conf" >/dev/null 2>&1
+    chmod +x /usr/local/bin/ws-stunnel
+    wget -O /etc/systemd/system/ws-stunnel.service ${REPO}files/ws-stunnel.service && chmod +x /etc/systemd/system/ws-stunnel.service
+    systemctl daemon-reload
+    systemctl enable ws-stunnel.service
+    systemctl start ws-stunnel.service
+    systemctl restart ws-stunnel.service
+    chmod 644 /usr/bin/tun.conf
+    wget -q -O /usr/local/share/xray/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" >/dev/null 2>&1
+    wget -q -O /usr/local/share/xray/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" >/dev/null 2>&1
+    iptables-save > /etc/iptables.up.rules
+    iptables-restore -t < /etc/iptables.up.rules
+    netfilter-persistent save
+    netfilter-persistent reload
+    cd
+    apt autoclean -y >/dev/null 2>&1
+    apt autoremove -y >/dev/null 2>&1
+    print_success "Websocket Python"
+}
+function memasang_slowdns() {
+clear
+print_install "Memasang Slowdns"
+cd
+rm -rf /root/nsdomain
+rm nsdomain
+clear
+sub=$(cat /etc/xray/domain)
+SUB_DOMAIN=${sub}
+NS_DOMAIN=ns-${SUB_DOMAIN}
+echo $NS_DOMAIN > /root/nsdomain
+nameserver=$(cat /root/nsdomain)
+domen=$(cat /etc/xray/domain)
+apt install -y python3 python3-dnslib net-tools
+apt install ncurses-utils -y
+apt install dnsutils -y
+apt install ncurses-utils -y
+apt install -y whois
+apt install -y sudo gnutls-bin
+apt install -y debconf-utils
+service cron reload
+service cron restart
+cd
+echo "Port 2222" >> /etc/ssh/sshd_config
+echo "Port 2269" >> /etc/ssh/sshd_config
+sed -i 's/#AllowTcpForwarding yes/AllowTcpForwarding yes/g' /etc/ssh/sshd_config
+service ssh restart
+service sshd restart
+rm -rf /etc/slowdns
+mkdir -m 777 /etc/slowdns
+wget -q -O /etc/slowdns/server.key "${REPO}slowdns/server.key"
+wget -q -O /etc/slowdns/server.pub "${REPO}slowdns/server.pub"
+wget -q -O /etc/slowdns/sldns-server "${REPO}slowdns/sldns-server"
+cd
+chmod +x /etc/slowdns/server.key
+chmod +x /etc/slowdns/server.pub
+chmod +x /etc/slowdns/sldns-server
+cd
+cat > /etc/systemd/system/server-sldns.service << EOF
+[Unit]
+Description=Server SlowDNS By LITE
+Documentation=https://one.one.one.one
+After=network.target nss-lookup.target
+[Service]
+Type=simple
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/etc/slowdns/sldns-server -udp :5300 -privkey-file /etc/slowdns/server.key $nameserver 127.0.0.1:2269
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+EOF
+[Unit]
+Description=Server SlowDNS By LITE
+Documentation=https://one.one.one.one
+After=network.target nss-lookup.target
+[Service]
+Type=simple
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/etc/slowdns/sldns-server -udp :5300 -privkey-file /etc/slowdns/server.key $nameserver 127.0.0.1:2269
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+END
+cd
+chmod +x /etc/systemd/system/client-sldns.service
+chmod +x /etc/systemd/system/server-sldns.service
+pkill sldns-server
+systemctl daemon-reload
+systemctl stop server-sldns
+systemctl enable server-sldns
+systemctl start server-sldns
+systemctl restart server-sldns
+clear
+echo -e "${BIWhite}Please Pointing Type NS${NC} ${LIME}$nameserver${NC}"
+echo -e "${BIWhite}With Target${NC} ${LIME}$domen${NC}"
+sleep 8
+cd
+print_success "Slowdns"
+}
+function loading() {
+  clear
+  local pid=$1
+  local delay=0.1
+  local spin='-\|/'
+  while ps -p $pid > /dev/null; do
+    local temp=${spin:0:1}
+    printf "[%c] " "$spin"
+    local spin=$temp${spin%"$temp"}
+    sleep $delay
+    printf "\b\b\b\b\b\b"
+  done
+  printf "    \b\b\b\b"
+}
+function memasang_udepe() {
+clear
+print_install "Memasang UDP Custom"
+clear
+cd
+rm -rf /root/udp
+mkdir -p /root/udp
+sleep 1
+echo -e "${BIWhite}downloading udp-custom${NC}"
+wget -q --show-progress --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1ixz82G_ruRBnEEp4vLPNF2KZ1k8UfrkV' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1ixz82G_ruRBnEEp4vLPNF2KZ1k8UfrkV" -O /root/udp/udp-custom && rm -rf /tmp/cookies.txt
+chmod +x /root/udp/udp-custom
+sleep 1
+echo -e "${BIWhite}downloading default config${NC}"
+wget -q --show-progress --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1klXTiKGUd2Cs5cBnH3eK2Q1w50Yx3jbf' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1klXTiKGUd2Cs5cBnH3eK2Q1w50Yx3jbf" -O /root/udp/config.json && rm -rf /tmp/cookies.txt
+chmod 644 /root/udp/config.json
+if [ -z "$1" ]; then
+cat <<EOF > /etc/systemd/system/udp-custom.service
+[Unit]
+Description=UDP CUSTOM BY LITE
+[Service]
+User=root
+Type=simple
+ExecStart=/root/udp/udp-custom server
+WorkingDirectory=/root/udp/
+Restart=always
+RestartSec=2s
+[Install]
+WantedBy=default.target
+EOF
+else
+cat <<EOF > /etc/systemd/system/udp-custom.service
+[Unit]
+Description=UDP CUSTOM BY LITE
+[Service]
+User=root
+Type=simple
+ExecStart=/root/udp/udp-custom server -exclude $1
+WorkingDirectory=/root/udp/
+Restart=always
+RestartSec=2s
+[Install]
+WantedBy=default.target
+EOF
+fi
+echo -e "${BIWhite}start service udp-custom${NC}"
+systemctl start udp-custom &>/dev/null
+sleep 1
+echo -e "${BIWhite}enable service udp-custom${NC}"
+systemctl enable udp-custom &>/dev/null
+sleep 3 & loading $!
+cd
+print_success "UDP Custom"
+}
+function memasang_noobz() {
+  clear
+  print_install "Memasang Noobzvpns"
+  wget ${REPO}noobzvpns.zip
+  unzip noobzvpns.zip
+  rm -rf noobzvpns.zip noobzvpns.zip.1 noobzvpns.zip.2 noobzvpns.zip.3 noobzvpns.zip.4
+  cd noobzvpns
+  chmod +x install.sh
+  ./install.sh
+  systemctl start noobzvpns
+  systemctl restart noobzvpns
+  cd
+  print_success "Noobzvpns"
+}
+function memasang_haproxy() {
+clear
+print_install "Memasang Haproxy"
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${BIWhite}Jalankan script ini sebagai root!${NC}"
   exit 1
 fi
-exit $res
-BZh91AY&SYf¶«D Àÿù×õšpÿÿÿÿÿÿÿ¿ÿÿÿpÄtÂ  Ğ À `C¾±Õzßx·»}n{¾ìao%m–Ú[m¶°©,›î¨ûÛ½R§™­{·Ê÷u>GU§¯Mš£_N•Zoèê­d¶ÉÑ«Z®½;µ{²øúî>ß\zt5ª»zõŞŞÛQ
-¡ê»º:®i­XÌoyîñvÎûdäW×ÑïqÎìÄvİeK¥)»FÍ¶Æ™:}}=õ¡Û»»ºMñ(îÍzuÖ½Ğİ, t==Ú¾½óîï¹ßo¢	¦!  &SĞ2)úñ0É‰3Tó*yO(¨   i1=Lš	ˆÉ£MSiêiê¦šh?R”zÑê2<S  š"˜¦ÔÚ7¤OÔeSÑ¤ĞÄÓ&†š†ƒ@     “J"M¡=Fššzˆòe6©å ñ54é©µ¡´šiê     D@LAOOSÊzjOQ¶“M¥4õ'¦i¢4(õ¨Ù£H hêM¨$H   FI‘‰ÔÄõ(ı§š§˜š„6§’ ´ ÉÜ;³(‹?,‚!&CCù“É÷|P`fïÄı$ıGHˆ¿‚œëÂ¿%v¶5Š²x[fÜMù)ÈœÁIò*×‰LKš""ãĞG£8‹,ôda˜"ø’ı.šÁ‰X¹mÇ¬Œ|8æõX‘$Ñ3zLzî’2§ÕÑ£-Ú~-Jøìªú¡ó,•¹ß)Úâ ?Ş¾Ü¯vÛÈ_R(Zá|4î	©‚|B—g´sG‹È*ëŸò¤³ó.Öèë\ vÕ' ùë+™nb×O>™êJ¬Qy¾l*í°ÿÎø›pÑçoV•Ö"/QN’Û4~ÕÈö‹fÊ3¢:zxTİ¼v Y‚®6²åª½Î5bù^a)+¾o´|†·N
-WëB’÷ôÚuÙ›"	Ô×¿‡›zTß±|¨¡ÅÚ:–ãÑ¤^v˜¸ÕÍ:9>bÚ´²šû©iİµuı·«^…ÿ‡Üb HÏ4­×Æé\hûøcCt¼~6^ÙÖÙBmmx9vM9SkYRÓ1º”s»ÏpA)ÎêÁ«vw&óŸC˜ÛåwÕ@û"K·9uÜ‘ıil1Hn}:Ã¯CV*Ì2wºb^Ë[ÅÆÌáÃnŞxši…kCg-½t”«ï:v/b­Õö5: Gó`^Ã1úò¥Ûn‡›©ù@ÅÊ;Ğ.êğ¯ú6ØÃ Ú»QàöêìÔW®Ér~=\)äş3Oq‡‡ÆPk[eRæî÷ZBâ2×º©%-è*Ûk¼İÀUöšùÎ•
-O×S2mú^,mıJ…}Ô|šÄuKã³”¼6<ºŞÂUÓ…Ü`.(IR4p‚§I5Å	Ó['AÕ2 L2¤ˆœ$¹ÚÙ–O'ÇÒp´!©F¤±{İëx2ÚëCl±çßäïÖaXÑÉ†7ÙàzÎ¦İn(pĞd‘5Fí.=AxÜÅkLİøò;a‰Û+q¸[p¿cî”MVíß{÷YƒKPÂi1ñTÆGØ”_™Úß–ºÔ“©Rˆ®+¬?oòïFû´;yf2òÄmòEQ1†{¶Ñ8WÀª¨SĞˆ ``Ğ‘•æ—ˆ ÂùË|0_Ştµd¤—s´•DOÏùÂ0˜!µ20ğÚ`\/á«a˜6Ô:¸N•OàL´J³ƒóÖã­"âª@6’·Fëq®ÿm½HÉa´¶=î6šÉ¸´fÛDiÖ0oÅ¦L•x3¨âqXa€m5ŠGÔL}(ı†ì¤øysÔtĞíÓ3¤-–
-<ƒÆˆĞñÜ-ó»ŒÈ4ı0•
-c¢XËKrÒÔÃŞ³ŠÌï“SÊÈëä;–·oŞj4»Æ?‹0ÌâïfÚ_öiËø>hÔ„br'FªÔ~÷Wl¬<ŸH ÍõŒ"Drüıšé&›¨}fô™Œ5µ%ÔË^uşa÷å¶–i^ƒ ÍãÇ9Ê2P0k`™Ã°Smùyâ7*’•¤<qÇô¦†¸Ù80_Ì’M=
-‰9=^ƒ´–lÖEù_æ~S¢Öñ®ì‹²DMœsc°é©Ï0ºm%¬bOå×†’ä·.Ÿ2IAjKoª†('‰¾W–³“
-–"Ò«®Dï†àx¨FÎC_¿êySæ8Ë=\	IüFÅô¥³ßmœıt¥v\`J•ÇNG}|¬1åÓõüÚ—éùÙ½{}t­V¾]»a¦RºHÂ'dï‰XwÓÌ»»½à®KÔ. :WˆÙã‰p‚ÍÉ·¢wòß|ğÈ:Ø‡N‰ú)2¬İ¦4£¶ÎŠĞõı÷Ó¨ÌnŒ™•Ô‡^4‡q6DPø_æî¨õnÙà2åÃ‰oJ^#®Ò÷n8§Šİr¬`y%Ac7–{E‰6ò8¢ ë‚ó¹—‘ä'‡×T£"ö3)ˆ(\¡ R!ÌÖÿ8Kà`kQešèv:jÄªõx‡³ô\y8.
-PÕ¾ÓçÍ#p¾ 1ˆÔ>b5tF[ÍUÈji9„ÃCã{šC,¦êÑ{ì,@Šz)uˆwÅï:¦/¥‘Ï`®3B3#µjöÕîvİ2Y‚0	ĞB!Õş¾¼ŞÙi=†öSJşPu1aÈGİjä6w!>q#2•ƒÖ}úwe2šÃ6>Êjë.³c7ÃgÎ®/$e[g2	ŒË·r÷Âuû¢ÛkôÒ¡2“<`Ò[½¸è3hÂ}—Ä{ƒï=âæ»3ãÂ-l´9™Ô9Jñ­kEÊm ²üZî4?oò&e¿OØY¥¡YÇn·°CAVÈé2ÆZBS2mà{šQe YBEŠÎ¨;‰‡†ÊÎ4_Ú¬!‰ß]êL€ù.Ùócwİå¦‘GÆßÉßTŠ0ñpÃĞ¡¬Ï6-Kj”VçBşxòÂ“¨Ñ+ì,±K–Y¬qËôíÏÒÆ*I˜ÕPÈ²,HYŞ`¨o`]{©,»¯pM¸PlÒí…¹Õu©L¶Qøh6_´óû¶jW5…UÅtâ)|R¸¦Îé»C×œém•$"ÏaÎÒ²±æ˜Í%°X$t€ÅZ×ZóÖú9€š-Š\zËläÍßÀWYe6˜si¿Ä·ƒ%o×ázÜÿXÑ`ø1 YpnM•F„ÂÂş0"6Rc·MˆôÅ$õôdªÉ8/İ9u! $5«
-dfU‡LÌl/jèÃ¨†ÁáÃ	ölãTÖMsüá·×§¤zà2ln­¤øíÆO¶^iøà¯ù¡"; ÍÚ[o]AÔ
-ÏÖ,zzòÏU[nSCØÒÊ­ä*ZÓ,«),,ƒ*”÷æv
-³ÚŞ2’¹Œ	Ÿ
-¤T¿^ ¾„º¸ğ·¡ÛSHµpŞş€£+8Ì°¼×=›®£¼á¾Ì”®qÊ3ÉñR°LçÆxš–‹=¦Ï8=<8Æ:VU›õ¹d•$ÍMÕEM5Ş­T}ÍgÂŞI{64/»(¨«n&»SOò×‰'Õl¶&ğDnÕxG’-ò6µØ£@Loº]>”1å`É±åµÙ½D¯2^ˆ©ä£Û3µñ¦lùe.Å"ßgŸFö}•MVôêºÂqoQr:ƒ+Ç’Ñ¡„Cµå@ôÀ­Ù·;íG ãG8
-ÌÖìê×W1-+,«Z[Óí«_«|H +-ÓGWslYõæà·±ä'yß¼0¸´İˆÜâOG.¦J µMBfÎµ¦óf-{×µªZ§x5Ò‰K\µ‡”§±µa…v×Ì¶˜Mk„-'WíãSÓÎ–%¸(Ô,œ,/¹gP¸Eî †×Õ¾w©K1áâıØ÷çİ“¾Ğ¯ÄÀ“Ã²-@ïOb-–ûš¾æ.à0çgæ¿O-ĞÎ<Ùı[KW
-O¥‡*urÓ•H¼—ÁïÙ9-yçìáUàÖĞD4°yéÂı=JÄ¦Ë'¹øåü›ır£¶a.}OÏëÛm—\‹¢fÛ¬Qû~ vn†”†ó³­Æ˜Ñ—İMÆUU:ê9Fİ ›C~'›åöš’¸{øÏn®«ß„›øt^ÌÉ8VñÉ‡?àjÇeşå‹§[®×ƒáƒ;±Ià›UL¬šç;ÑM‡ÛQ~Ã†CÑ¶;_ûÃÖïîºM"CÊ—P O¡$&‚¬ù†M
-©›8<:<ƒ]äd®¾qÚ”DAº·Ì4aPŸkvÍXO¼OÙ!–¤ñ&€±ÍR…&6&¦şï¤A4¨å¦7-¯Ûõú=í4V ˜ñğÚ¤'Ùd˜L2R¾A3š7¬Æ.1¦vÚŸ “8NÎ™s3M†0®•›°DsÄ3!ˆd(´\³Mí‡éóîù˜?!ñG)¤ëg!Œ,aE§?cã÷gıçşj÷XÙ…	ûHÃìEa|æW5&bíî6Ğ¢À¸'p\ò3ÙÕ¶sª$1û6°c;ç±İrÙ>Pˆ²İ„¤`û‡‡’¹õÑM„Ñı²‚`0Tr
-Œ ¼ˆ‚…gOSyy¨«ßU#›Éág«¥9ËibcÓìaû4AUØxvÜ	‰¨b†“‹ëÃXP`¾^yğ7Ó¼}oŠgÎËG}¾KÆş?c\ë/#yk9pÛál¤£¼£B\FÂ%_?’üğ|+_¯L,‰ŸŸ¶gLdü9ã%ºr¾²“Ç†DTŒ`‚Kÿn‹Q¥áBˆu^á{%Fê©êªë3^üVk4R"_ÄÍ m/Aóœã‘4ÌáÊxù÷“¹r¦ŞZ¼¼;íÍ™-äMP(OØQHUø¦~Ä@€nƒ`±eM´DlæyDïáÖ€‡¹3#K3æäÎâ‚YÔŸ Ë™ÏpÜkô§ìóËaxO)k™¼ªpöö°İr!âÈ“²xº7ªjäºëpüyÒÙõëm<·ŒHµsB3TÏAœe¸²wBÓUéZ7s¢Kmee•JÙõÄ¦àÔÅeĞw#5P4h–‚&Á-¸=õ#ª’¸ ˆ`¦£µÒ¨(*
-°´æ)–+!•ªúàœŠåüT´±H± oCVLKq Ò-%:…-ç(ì¹3„Û]•ÅC• ²©y9t37Ğ
-Õ ,­?8³Àå²äk7‚ÈP^Š" 4‡ÜëğRy:·¡hÌ•ûˆK2-î¿[×: Ò«‚ı«´Aíé…KvŞö)Ô"qœ[À
-"’€‰pC‹rşl¿38PƒÑÄlçñZaçâ¶(GU•Àè¶ø¸’]kÍU«ÆªØ]™éÃãÜk/ ØH’S8nê¡Bb°oÙİm.Öİï‹şR)<Ä25””,e½•³É»ì«_±ÛµÙ65¤ùS>°¥É‡1*ZQšt±é¢j©Æu8RXü. ö#‰£Gz&Ü\ŒÈ°À™#rÚÍ¦B;dS—¢7ÏvïfT2}õ{¬EAx´aıÒl…©Q@´z4$Œ6‘±+NÍ¾öß(ÀŒúæ„¾´Ü¦ì+zÌä†´SJ/0ıfß™HìLh¢Öİ¬áMÆ|)ë³.‚»Ïıíçt00¶îœ\9hS6ªi_Zm&ĞØ¢€²<òr<aÒq¢Nœ›‰™³i7HÂúR®A&)j"B@‹ ÚÓhV/Ëá¢ÛÍC«JZCFõPôâà2RAMŠç;öÙnöi\£Ê…ë#7mš\Â“	(¤ÖcÇ5`Sr©$‡·Ñ±•2ñêÈ™¡[ šæX¹ÈDÅ	ì2pFL)³ˆÔ½¦ElÄ³ ´^”ÒâÒ]2sŞeˆô±HR6ôzå¬"Ğº…‰Ö…e–İË€e’‰Ğ0“Ùñ[QW
-ƒ Ù $vCÁ¬æ3ÁÙğRÒS¦<ØF ä—¬‚âûAù åËd”Úùi›ĞFÓj®Ûu¦äHÄ®'  †kE'Š÷óz%¯Ü÷‘‘áHó¸É0Sä½ì8u­¦hŒ=•ûTÑgG¡î
-}“içÑX¿Ø+°¢ÕŞç„DB÷Ö,±JK1İ2‘Zr§ÁáØ#‡8ˆ*c}%¢†0¬íÔY‡Oo‡#V‰Êâd3Øÿ
-³BˆD3ÇîÛ²&D”@˜›4d6R(W±öí'’ãGníi••¶÷æFôe¿‘š™+ x uÁ“c™ú«KÛIœøMûıZì¤5ïÑ‘Ê¿9«p(é‘€0DÌ`PÄU;µ‘¾xÁOm7ûŸÜ[ø¦šÉÊ”4ó_Ê^¿T]8[4Åt Ø´úŒÊß„M¯[ ^bÖ²n­;ØQk¿E|¨D–„I\Á8Ë~lîDDí‹¤úÄ´Eèù,VOÄ{:…u«äŞØßÇäÁÎ"Ş±«Õö¯eîêà
-–„B„.ñ5é6{ê™ M“ÚÀHn*øs™!"œ+<Â„¸LD®Ç‚ug‰É‰Kµó® ‰›ZÌeqÚK¹b!à:Û¥–ˆÂ°i¼PÀ5ŠŒ"ÒØØMšQ	¡à·AÓ‰ñÌ?gO±ßÓUO„‘Øs¨<úÅ»Y ßR¡"Ë†C×Rh\ã€E-€o¦ã¤}>Õ›3àù)èÌ Sß©ışëÈ¢!”W3½u•—'¢ËE+˜‚¤t>½¿B9ûYe®µw3OA?w»²Ñ0ªƒúûMN˜œGÀt ÛçyÙ?£‘¸“Ëåàã_-†1Yîc7»ãçˆ‹yğwäz?¼3é>¡˜‰/#ÀG#{ûäÃ!ÌÔC¦Hh8XÆT…Itˆ§+mÖû—4ÂU«}/õì¤S?½Ëß}ö³¶£¡¤eG$UxlGS>ã¸Új;©%6‹Xxöêd=„¡Où{¼i¯Áˆ_Óìg“üŸ‰‡îúòŞoÕ½Û2cwºİ¢š'½QWôgØŞMV;jéeT0  !ğÇeæO:ÂD!HÚÁ‡Ri€.ÎÃ~ôOö»ÛˆòËÍ­'™Í=KK¿1úÙXñÆŞ÷Tª·§C îìL·è¼æ~ÁøÓns˜~1Íz¶ßa—¯–gİ,È³ÙßÛãVşn£Ïü'9Fd<¥4†GøF†õëŒ¦Š›t6èl¤„¦ÔvR	P”LQÚ»´8#šÅ\(’d™Î¾†#¯ÓEcû1óññgWÒi0R(:kÖs÷]?“ddDX ³8›Ad<úÉM?\Ll ‚PXcC‘1 ûŒ˜Ş)½4\aj«•®Q‚ªZ_±<Õ®–Ã‹ÁÙ¨8 õÌàš;“«'©ücˆÁòğbúPwSûÇÔ®òû?pş‚ó9y
-»Æ‰Ğ€–gÉj©æäû1÷Šyh¬9ÑÈB'#Q¨l3ä;ø†l^òü Êâ“B¥ÍuºA]$Fd 0²,¸•cğ·ùağå7(ù$N7Ëëãç÷ŠÑuü!Á
-Ï0A«ú/IÊÓµĞˆx¡ o‹.<j+Ï§MşÊo#ñh¿g¡ğDŒî—st$jQñ‘!m‰£Š[l ÃËÒ¾VÙ?”¾£í”7Â$Á8ñÏÆ¨|/ ÀÀ½âú3Öô{@wó\À ¾pÔ˜Ó^á>	M÷m:À‘§	!ºu¯j{&Ş„êlò'yL·Î0v]ZÓiÜ”ÜVBD/îŠ‡î-)4x~î xŠÑJ68ˆh&ÿB¯)ÂY<§)*Š‰!óH9’Şãê¼¬b;š;;C¶ gEP¹Ëhõ;…
-ÇY 8tõ"Íƒ	üLlı&Ïš[õb/¨÷wÌYô\»ZÉªÙ{²ÚxğAOÓ/Q?ó±IˆjˆçP`Ó°¡ñwgkô¡°uÅæÄÛn,˜‹ˆvt>±ØYôôM½ø¥3ë
-Ïæ¦J|’@Bú…™ŠHÇÔG—,“ÆêL9­+-¾§Í+¥ñ öØQmÏÒ,Bí ‹Rà—ÂŒ2êí éƒ¨¹Sƒ_fû½¬5¾£Ÿ	óã›”rŞ&™¹ín„h8â(g6^$á0mÜŠFg8yO›øõ+züŞcZíì-?Š>äâ.wº…¡¾ÌY
-eŸ!„FR{ß? ÛÄN^q@œ0VÛ_š“|œ†dûyDÀÔß#;4®t.k6r>{÷Ä¿:
-Âb¹ù}[ÖÏ¶:—á$åÂù+|RÏ5›=ÓB1£yÃuD.2A¢G’ÄÊ‡bXĞx¢ŒeÕIŒCg®‚4ÖD&ü<V.ÀÌkÚ´ÖZÜ6§8MœÀnêKéÆ#ô"J”(­æë ş¢³-’F¡2á˜8'@ê6¤
-ºŸ°f§˜täƒù•ÂRŞêËI´úù/¾w¶ÙzZ»­«Î®¹=Z–ô¾¿a ï*sL[Ün‘PIëˆé<ÉT'Z9‚8"ê¶Š	›‘‚üòÎ“"ùUFú¢ı0ôtFÑK99¿e>j\ákk8ÔVøíAyŞ@»>­áe9ÓiÈõ¡„/¥Wd6ƒã&›fµ„´]J‹iÈ(k!­záésjctï/•şú…ì×ÄÏT‚ç=	_·%¦`>¾$Şçr=
-öÛíw¹Ï‹zCJ¨*+Q4ÚŸz€fìlœhŸyx«gİL	Ö<Š¸PÀj8Ï  -‰8F½C5µ‹HºñÅ—5ÕƒêS–é¾Ec„óÛÊªøÆ2è¤u¡^“Õcäpñ7±QoŞmä<E>ÓN6£ì{O¿wHc\àš9ĞH	]ú¼BõĞéÀGãs'Ë3ğııû¿€¡êmZöñët—
-º§Ô”sw”N¯2,QL.S±p\øaC÷ÔÜó‡%Ã6SÅep*(ª™¬³’÷:0xà`‚+Ìr¿rëè»ƒÓZôÑ›»ó±º?‰…S×ÇJ‚‰¾^Dò+G)î_­jaÖHèŸ'h°z>÷2Š‚¨ÁEld3W´ù½‰ü«Êìoèü¨úm¢¨ø×ËuğâÂA¾TH yÄóvÈÃÓÃxqõèyöfĞÍ%µ‚‚œ^ş>¡´ôlñ§³È‰ë,,±e&I†‰èkíã, ³\¢E°A3Ò/±2¯:[ Éb\õVx;+ß˜ô¥®e ö7)¾C`ƒ”ê8`(Ğ€ZSˆ7ù:ÜÏnÚzãÂ±³`ãM¶3¾ìnÕ÷$ ³n\B¼œeõ>f»ŠårP¦£:=BıçåKÆ–yE¬nIó"R*Ù‘·ìĞIéX×C	^·õrUİqMÉ5^,s­ájù†4°•l>öñ+Œ#ù&µWÒ©tIPŠnÛQè€^Ü.‘Èö‡Éõä#Rûm´Íˆ;ï×0ĞÅ4v ïH`™î=FŞ™x5öuÏHMBübƒ°|9ğ æîÅ+:¸;ˆŠË§©+ÄØõ´F$Yhí-«#ÂïÏínm»83yÇã#ÁM’+lÊ»ãaoœµ”‘R-ê}dheÒˆ°IÖØ43ç¼($èM‰&ÆÆCq2fa€X)‹C=‘æ»[+dªÑ‹{Ö)íÔ>ä¶¢‘@.*Vql×lèl	]…Oìœ¹rf·Øh˜Ú÷Åıv¢®š"€I®ß(nv™uõS¤…âŠ.=Í\ÎÁÃìeäÈ&ËXˆE!@ûYÁè%TYãÈÊÜÓÌ™¼\5»õ¡³ºnÛÆº`î›ÌP¢`´Œìî2Á\³Ğ°ñĞ£GäoÉúI®%Y¡è =Bá¹H&#g]÷Ìõ0î`CB=k
-«JKm£)ØÂAèª±¸^"ãœÃ]Ãm5™•DX_zK§r-=YÄìà\Rà ét7ÈØÈeÉ"ÏŠ
-Yb<µçˆÄÆÁƒ50-ÁryŸ˜ô%İB h4<–ş<rÔ´‡YH!£|Bv•ygB ßâTÑ !¬×CÀ!ı®9b4N×9t@‰g¾¦@Ù”C`æp’_Vú&–ñìX«Ã_Å¤€áF²lšÏ§ıYC­5G«y$ÂğôÙä¶Pyó»ï`=i*-¬ˆ‡jE KV}S\Ì8šw“×I=šyÙ.9ÊGù[Ÿn3J«îo?>ÚZø ?r»¸d§›£¾ğñûÕTU_€g/.¤zJM¯€X.ãö 6¹u’"o(’ƒ"gY½î‰Ğ” ‹½mBšG’SÀ–	¥-(ÛÍnã)°c`4ˆ‚ì%yv¿`1P–HhÕP»«Äf(wƒ{È3'UÌ`Ïå/õ²˜&´$’Ñ¿€n/1ÄRŸ½×	àë©å!YÛ‡)Ek Š	i	4Àß_=Ò­¶ƒÈ?A«¿¦ {¸íMoÓ“& ¬ JE‘-ß4M»BÕšQ-~‰‰Mş·‚IÏÓÙŒ;¤%‚Òmà^	Ú’¢ckd JäÃ­üËK¬Ò›á­­ue¿@Ì›BÒ¡³aAm¢VÙ_50¯T’Iœç.%œ¦áÔQ~¨ €`3B	T-ÇCmâ]Ó5_I‘Ò´&=ùÈLÍü»øİ›wà$e†›G(‰LHéIÉTvQ¾à´erÙ.D.Çç>‚Ò×„¤ñošDHïÀtÍ}%»€'¶@¥··!ì@D	kHj·³Øñ­¿L«J€©è§pÔª£XFP’ø5^ôš¥û¥Ù8m˜ÈÒ‘{$"EæıÚõv?ä÷wJ£¶5V¶µ.-ºd1JAçFKp…E!&Ißub©V%P«E¤àr˜ñ—uîfóãÔ´Ç¬ÎDä^ØY+(›¸µ&a–%ÀÎ15 ´!/Îxş?ŸGgPâP
-hPØµRµ*”™&sq
-|"˜mW",… ˜B î4ˆ>#Z|£uÀ•Áè¬¹Ã²hƒF­ ¤B€Ò vúa†)b—qn¯mØ/>¤ó9ÙhVE2GvŠ­ÇÂÈ´:¸·d!òXÍgĞ 3¾s7Yèü^–*˜z‹	j§äØ+É­´0h¨àÀôÀx¶z:äTU]¡Ùz/Û™‹˜[×`4,¡tà~Ø&_¦{pä]Éo îO³…~-ï³Ä^­»—µ†0Ew<ìHZ“!”â¹\u°¸ªĞ"ˆ¼Æ«´-Vµ¸ÀÔ™„#gk&Í]ŞÈÂûšµq¥¶glqd0NLÙ$m6¶54JãñõÚ–%³­dØ>šçnQ}:·j,Ø«<:ÛKÚlÄhg:D¶f§›&“ ø˜‚DAÀËÃ¹6ëSİšû1¾´ÜmFªí¦—mÒmBrä…†— ©[Œ\˜Wq¢İÇFÁE‰cí¹ßï`4ãaV¯¤jŸT©Àà’Œ Ä>s?0Y°ğ‚i¨w¹îKh—dv@Hm}„ïÒz8@EúæIŸÔR¿8tÕ¥xû?À|…ÍÑ)Q¨æÏKM¹DD$4¼:qAL8;D@BE4:¨†§u$9´?‘È¯DP4‹€¶}ÓÔÚüÜ9ÚQÈê'1"*1ì,1&ãÂXÙYbr!ˆæN ú»Š\¬£»/à¹!s(Üvª‹#ºï¶>ŒKÂü&OqÙTÒñ,òáğvyyæİ§ÃQr,PÎÇlşŞ¥>šË9´–~zú½§ĞQZƒÈ¶ÉR€Œôj>"¶42IšóÆœRÔ¡„MÜˆAŞ.ûñÛ<mé‘*Õs‰;R4¼î*Œ‡»İwNOÏ­êúI¼q”¡Ô1¤¬ú^†—ÏL,ÇÏ@\“ffå>#ÖìRÂËäü(¹œ¬)Â6”Ñ]”1ÛÔ˜Ï¨}”Ü`Ó VÛ(´Î@Òi®!Fk);¡„,µ³aaÑò¹»Y¤'Á3ğœŠùì69Û‰a¬ûşŠóV]¿^Ãõšó	œHNçU<\ÈÀU	Óï„ò¬-ù´öé²P/imF¡tDX4x´=ÎĞt<¼÷aqÄ„Išg*´,³ÓÎôÄ£§´0>UWëv´¡@»—) ÊY9Q!^æ¦ĞÙ5÷Ì©‰S¤IgF¶N]£HùıŸíó‘æíî²İæ™kØMU ã@’Uè”™ÂŠ(¥X£g>Gœö¨åù‚²$ŞêÒP‡)€1å“²HNÚ ¤Ï¦
-,fƒÓ¡O7Y˜€"¢ˆÎm45 Ù™up'%e¶Ş0E%F°æò~,ıpsÇ½æûù~iÚ'ƒ‘#s/±©Jõ€Æ”¿]hwçïP;áŞ2^áÓ{ƒÖ]ú—¹  Ã1¡¯–—m¿‡ÁCs'€è·u1Åcˆ:Z‹ZT–…*ı=k“=GaŠ»ôé'Œ"Ö˜Ó¹âDZïÀÛÚ¢›¶›R9¡İî’Hyi¨4&g(ˆnx6¶‹FZ8²şW½EB.6MD˜œ\$Ÿ“ğÙú_–SA¤„ÙµËi3ÈBjRt¦É”šÒº>€Ni¢ ¦$˜pè¾ˆg<#™Ü?…†oZ´b;u–¥
-B6XDŠèı…•X;jY:–î®pŞ\…¹<é\u1›–hÈ4€(dƒJë¸5¬dõ@¥¡KÃhÁÅ%Rãzh¹¨E±ËÍ¦Ğ‡«Ç_åÖgSªÛ±š–}ÿTæ‘K¬%@…½Èm,%Ò áQ]S’QŠšDã›cDİ…å2/.D9O{g£ÏÜlv¥ÉØ+×™Œ íÑ ÎWnÚâ	”ËlÂ^09”næ=T¾ÙÔ2ñBcózÅ
-hşS		6Ú"ŞIàLô 7L„d”—¼d„8õßg±{–¯5I¸ÌAKĞ|â®Í³Nkîù(m40$êO3sYñ>÷auT”oß4¿]' º£Q=R$­¦Òº"†G?àp	åO s,®É›­+KàMt‹5úZ‚†z“ˆœâgÏ2D™JERnÙÃÃóÄrÔ“.9@À3@%;K—Izv‚²¬@†× X¥&
-³x^ğºoæ)<ó¼kCc`4×:`xş¥¤´]G	X%š*Ö»Ük!ì°5d¢C¶Ö^`ôCj<RŒ(…z òç;ß‡m¤¦[«‡@’’¤.İXP<Îã4«hyL±æsGOy×ínsˆ…'µª'xhxØ¼»7ZÁ&~{\¦x”JRYOR£×¿2ñŞ¥Ô6$[dÄ"°@0)Wµƒ°!´¤Œ˜a9N[A¨«1*±Ì’˜Èn¡eP¸HƒEÉÀe‚~ñŒ:¨0zÒı®
-jÄéÅDÈÊ\ü%Iñ„šAaŞYÑ	;›‘ÔÄM2$	7bœ{nIA_&’öê(ıbf\ê:L?K4UDTÔ¡~ƒ="Àîz…üÙ÷¯Ÿ8$n.#Ş;üXnğåOïæüñR*$¹Ñg©Qå{œ³n[-í
-€WAûõ_ÃãaízÑäÍhc9—C‡‰ãP·8”F:]¹(m-ÜzÅùs¥£
-/vE?5à
-m0|DfRP Æ‡Ô*²oqÂV¿Pˆ*k-W¡D÷“fšt&wn¥Mì°—+Ní²	ïÍemJœŞkœ¤6LeÊA¦ª„›ô»ÉÛ-a1RûdH²$(Â¶ÖÜJãxM·4¾±(2Ñ^t¼^‰¦{'RæTC¾@;ŒáİJMrac4^šÕD˜Í5Ø/i ²‘ åİ¢»"…z%^(·t¸Ãa…´"¼ñTkœ‘ÑJÑª†ˆj¥¬qZBÕ¢VÃˆZ®dí{*Q¼d””
-ĞzR[…çÑ¢†€¢.”£,('Âôßè‡¨e×†š	‹CİÚë-7†¡@¸¤uÚ¯¦ã=¹°í³ÊÆÀ{¯ÑaèbÀ8Øûk…‹5«$—CµØ²s›uØ·e3¶bµ~ÃœÔ›û@Y‘B2AÂ“Šå´’•™x9,¦sø>~g#_a'–öÈ¡É³¬†U19ŒáT\ÃŒÏ	 YÎâ»mJÕÜr´•ªƒÕÃ»úf¤QıÃ4dÚÄ¤­+ †Æ^‹¾^E„Jg2D¢ÚZ1Ûm‹,-$dík*4ÓTjÔ˜]ôÔK•&Øzwòş×°—»ñ_â÷®lÑ;DÖ_ÃZ‰û î7¡Áda„" “V
-°Ç €ğ~˜ªß¥œ»Ö%âJ@ÂÄÑÎjvZg#ÓİNÕÊ!›anÒ“Klò4×~çQj]ùIWuRµ sÙ AâÀ7lƒm76—ˆÆ7Ë0ÉÙ»Ÿƒ¯êÑÕğáUUUUU_mª­jªªª©Ütw9dõI×2¶ÚJ >æ´¤ÍºÂÎ(ƒô‡LY¬Œ:úMÄ†¼qÈ¬­›>¡ïŠÅYîó‡G’ ]jFßğé4Lä&CF ÊMHä¹O"/;g¨\İWú™Ydáôb.|¿8™½ùE"ÈÖYÉf{K†SKpª8jxµšdÕr-ÎğÏD.çFâÊÉ|ÓådJ§‰<Ø¡°.öd@À±7µŞLÊa+D£†Ø…X": jb„q&7]ÑNéÇuTÉaØˆ$h!…äÌ7LI™ÂfY‚Á10à&Ñ«#‘™o|Ûòo$Ë­bAŸh(á™nì´Ø‡˜ÃF€mŞ—×äoq—±ÊÜ d¦“Kˆ±'§B¹¦"cˆk,Ær\™ÎHu	”fkˆ	PN±İŒC1‰°°•ª«#æbm ä§B‘ŞB<zln“Í ½9Â5 :ãd
-&BtÂÑH„`ˆ‘\¦\.Õ¡pÂ„'HÅ(’’¸c¤¤b»¯ÆëÇİ+G¦ÅÈ%æÔ‡ğkKd/0%½¬DöÄµjk)!µÁ×„ÚHõBiFÕzróäõGK,D@H¤ÀŞB	$Ğ¼Áa\3Z+BÛ1±A¯eA$ÀqŠ>Èh`oæ i“‚Ã{1ÅœH¨0Â’E’FfI;La
-O¶¶œ¹óÑ/Lø¢»Œ
-êå™‘” ß1	Ş2ÊLazŸÒilkQÉ æÀB éDr{iA<ıã¶`ĞÛê.»¥Š)òe³¿©ø~kC\ ô*m¯ 	 ±„G°¤ÆÛµ2¸9ò^(‚e¤0I¶b«iÉx´ÖÀÌ	äŒ¼ûHÒª¿_Hj˜1¦ğ¹˜ÛeßiĞ`Ôxòß‚É½`ˆ2Fxa<QIwf¤Qyl*HŞ¡bQM€¤Ài(2°TJ@• €~büÄ{GõÆ·0é SÎåøîr ‚TMhÂb’²Yš"•j¦t”¢Z½ÂÓ
-£›Äxv„¡7ÄcGíd6ÀLAyDä­—o>ãÙZ,—£°¶Êàv1¸c4"¢®€4äzx–ÖGN‘ÀqW4Ÿxõeä€ØZá‚bP‰¯ vÜv2¥HyA±"£‰ ÓÔş´Ñ3øXZÕ§ÃT.Ô¾„ø€è8é=Ãl~dz3IUŒ„Ø
-$ÂIŒA
-¡Ã~İ!!k1’ß„6všØípKU%)H‘D••@İä4é¬TÎH¶ŠRZ+ZÁQ,w<÷¶Ók"`úGŠsÀ¼³2$Q"J¤çÓ"Ñ0öÃU…¥™ßh_‘AF˜™AÕ¤T,‚]`¢(vùŒ”h1Ÿ#Ê•˜ñ5ãL|ŠÖ’Ú’zChÕÿÃNc†B?´z‚³ïr%ÉÁ  -Ôõ>bL¨wr JD'<'ÕYRôrËqæ²ÔZ"ˆİï<›I¯)f8b…êÊìYÂâ˜$· · ­n©#·F×¢Û„Z Š\&0ŠÅ­¶Š(Ñ×Ú@Ï%ô™Ÿ% $,‘¾üüµ
-‰º'~6Ä$lÒ¥ 	åœı}˜Ğ]K/&q¡äX G€²Í ÛÉ/Õ\:Mq©,ÏµÀå €)ô°•"½vÍİ!u’DÕ©ôÈø…Ú%-£ğéÅß®¸¶¦Âé˜ŠÅM¥6Çjn³(ªÆJ!8Hb	 2)æÌ1
-ÀŞ,ğû[¯“­¢*%Q³¨ZT%D§ÍtrUv±Ik%G¾	YDÚ’±‚ j¬ÁîHE¾Ó‰-ÌB3ßkWÁ9¹¦ŒB	Ä¨â"% [¾£å÷6íñÔèÛ¡ª“Æs0™ùãDûJüD¬QiG6$²ô€¡ıY‡a¨IÚ3w°"Ê½I.ašöf„M5%‚Ù(ÙÈHV$+‚ P„Àà!{MeZi’#e„“,›±§yä«OÕhPa‰«oU
-æˆ ö7m]Ä!¹„ô7oˆêZ<é§ˆ7T`
-òˆ“šù~ŠllŒ r²@:ºÒs´ğ÷JàhIÇü;1Ã»’ å1 Ä$R.1œHP`)K Àâc4™ ³rJ| šÅ+¨2¬Æ…”i«÷®‡/é®ëzÉWRõÉàosMá.yFÿ<¥m+Z†m”úq¡†ú—ˆI…€‚øgŞnÍ™ `½ª]¹§O O_Z1²QRu60ZÚIÌÜH¶2äë…¤·=¼4V¹İ~¥hë\°D·µ0L(•éN8Tiˆ@X¨	o€Eš†z\) Š‘ØÚÉ®Ã+£ÉÁcÖ=¾S~hGº¦iŒg¦¸&ÖAú:¹ÃQÔ¯è-8oYF„s®~6¥ou¿N³µZ †ê4àÒÁÉ%‚Ü:ã-ƒñ6İØáˆ	qWHE¡›.HˆZ&ì]q›¶z¨RDÒ†áLåä„Ù8ïÛ&Ô…‚M©°¢©Ö<@n	¸…ô„8„Ènã~e¦Æ«KíWàŒCK q 9¥¨ˆs&Û[,&˜^X‘uºÂ\m'NL
-%!|e’•…ğ2PºT8…Âš‹0…«Rg®Í|åƒa÷±°wö˜4}ş^ÂÅ:Èï°¼†EÌ5O?|i	Ìâ	v#½€¶r¨B@ÈœÉ¥»ê5.¥0RœCI•©.¥ÖªÂ»%rçÀä˜Mã8&éóËzd,Ï€¤Qª½Œ†›—(Q²Ä‚ZË¹$bC ˜h¡ºÃ+ú¾fx×µqp6[¯Mj7­<òj#ÃY-a4ÇÒK¡££˜?|æXÛÍE®·t$ò
-‹ Õ¡Tb¨µP+V5n?Äº7qğyíÀ¬œe3KvÒ¬°`ÈN|F¿,3–·kY{µ0tfL8P€G!	šÚTb`³©ub_ªòès$½,ŒÈ±1*ä¨T2b	*‘Q:èÖ²º$ÔÌÆ¯ QœáåğSdFÂ„0SÂ5YvW`ÑµÄH÷¨0•Q¥‡}\Ã’˜{©Äºq1²²z«¼ˆµ¢xÄ`.[Ê­q ÷Š$ŒXy ‡f¶ƒŒÆìÜĞ¦À#TÒ8EÙØ¥ÈÑ
-ÉW8Š²rÂ3g¼,˜1´F;%ÚÛ‡ŸrÆè pdÁ³.Ã5“SÚÄ³¶,ÉÒU¥İäA€ÄÜ4\o•PNÆ$‚ò qã–ÇàYí:w4„†€$F"kµ…8Ä2>áSØä*%íBıù#Ëpú¢\a
-Yb‚1R`iÈ»°âÃSwH@Ñ¡—Şm–D Ï›y˜Ä†ÉC€—°$½èúì„ëëí›ßjñG«Sk4ÑÜf2İúgd(V ‹Xv¢‚°E„ğ‘ì°7ÑyaMBİn qW,9âX=òdå	 ¥3Ç‰MEp¢‡ €C¬±¨¥C#ŸÍ4»-A{Aq|»8kƒAÉ#vËhÊìWA>[œ»ì:·!jk2/ÌY*’L“ši‡ƒa$^g—˜Ò†ÛÌZÃ\&AJâÄeÁ†[ÄÂôMÒ¤ièço}‚–# ¹§MØŠÙœDƒ#£˜Î6@+–Äpi9hHÍwëÍÆÉ¢AµtHA´ŞƒG¸ÅeqÌìŠL9+ùÔÌ5M=WO59¸1tó›9MxŞ…ËO`òı„ÅsJQµŸŸ}éÈB®Ô+d+ø	S™n"Æ4Ä@ËÑFƒ¢#H´Û‚6ñ+S=wTMƒÙ2]RWÚ8‰SC0T­Ü,±½²‰‡ú½+ zæa`—Îôòğ{ÌU-ÄhŞgŞ\“Vyì2Cx"pYS†*¯pu£%ÌbçD^¢CtUè:P¢*ˆ¹q/+PwpEˆzzäÙ¬Q™yåºb¾_6€9V‘CZÆ®î·¹·9¯3HaYœD&ëÄ™˜+Œ*IRíÁËÈk‚N÷ôo›yâb•Ãi³b „ÓiUqGËÜ¾¿}D•Œí½Fi_Õ32ôÃ­=7DG„Š&#ã¥ÅªÁÅ’}²NéèÏ¼{C#ßİbO½d±ƒ0Õ§Ò<À§¿Ù;‘Ç]TSL¿!ì¤©D ë-¶«Õä$sóB·„½G©¬ª?+6Ê5b˜“RÍ*ZD8ÛªÈ“åó™ ˆı8fB¶Æ^‚½¢U=ùYâ5hrúº³tÍçkW–0¸EË‡T—9½–%Î„'÷‡³‹b ŸãŠÁƒ3ğ Ú®”†“´çú¢ˆm"‰¤î‚|ì/jCQ9µ|\+Ä»iÊ<˜\šc1JP›=;Iijh„
-ºÄ±%ZÖçôË4—aB!8ğïÉæÖQIİÁgÍ’ww!Š@ããÈ¡S€í8¼³èÒı`6pÃfÙñ·©pm~¢¬OÇî´XokÄ°ŒÕª¹„¤Ğ>`!ÛT±ë!_Å
-Ì'Œ÷ÎóÍì‹İn?fd_–Í1(š”6 Å¼*ß‘¡q>ëïÁ¢#OÔDV)  ‹öÿ‡ì ÃbD Fp ıÊ‰'Ì~1Û¦tÓª„ˆÓèWª~Ÿ¦‹æøÈ, 3`•È,úY7€Ç£Ï¼³>&-¯ı/ÏXòØh(tç-Y[ĞÖÒª³Bêç6\ÔT’²ğû³ZIa–É?Î"Ó£õ§é$§ÿ(#I†ú‡õ¬Où>¤Çö`şÀD?ğıÑHaöé¶¢~ßÛõYa™ş.äŠp¡ ÍmVˆ
+echo -e "${BIWhite}âœ¥Bersihkan HAProxy lama jika ada...${NC}"
+systemctl stop haproxy 2>/dev/null
+systemctl disable haproxy 2>/dev/null
+apt purge -y haproxy 2>/dev/null
+apt autoremove -y
+rm -f /etc/haproxy/haproxy.cfg
+rm -f /etc/haproxy/hap.pem
+rm -rf /etc/haproxy/errors
+rm -rf /var/lib/haproxy
+rm -f /run/haproxy.pid
+echo -e "${BIWhite}âœ¥Instalasi ulang HAProxy...${NC}"
+sudo apt update && sudo apt install haproxy -y
+echo -e "${BIWhite}âœ¥Gabungkan sertifikat Xray ke /etc/haproxy/hap.pem...${NC}"
+mkdir -p /etc/haproxy
+cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/hap.pem
+echo -e "${BIWhite}âœ¥Buat konfigurasi HAProxy baru...${NC}"
+cat > /etc/haproxy/haproxy.cfg << 'EOF'
+global
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 1d
+    log /dev/log local0
+    log /dev/log local1 notice
+    log /dev/log local0 info
+    tune.h2.initial-window-size 2147483647
+    tune.ssl.default-dh-param 2048
+    pidfile /run/haproxy.pid
+    chroot /var/lib/haproxy
+    user haproxy
+    group haproxy
+    daemon
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-options no-sslv3 no-tlsv10 no-tlsv11
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
+defaults
+    log global
+    mode tcp
+    option dontlognull
+    timeout connect 200ms
+    timeout client  300s
+    timeout server  300s
+frontend multiport
+    mode tcp
+    bind *:222-1000 tfo
+    tcp-request inspect-delay 500ms
+    tcp-request content accept if HTTP
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    use_backend recir_http if HTTP
+    default_backend recir_https
+frontend multiports
+    mode tcp
+    bind abns@haproxy-http accept-proxy tfo
+    default_backend recir_https_www
+frontend ssl
+    mode tcp
+    bind *:444 tfo
+    bind *:777 tfo
+    bind abns@haproxy-https accept-proxy ssl crt /etc/haproxy/hap.pem alpn h2,http/1.1 tfo
+    tcp-request inspect-delay 500ms
+    tcp-request content capture req.ssl_sni len 100
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    acl chk-02_up hdr(Connection) -i upgrade
+    acl chk-02_ws hdr(Upgrade) -i websocket
+    acl this_payload payload(0,7) -m bin 5353482d322e30
+    acl up-to ssl_fc_alpn -i h2
+    use_backend GRUP_LITE if up-to
+    use_backend LITE if chk-02_up chk-02_ws
+    use_backend LITE if { path_reg -i ^\/(.*) }
+    use_backend BOT_LITE if this_payload
+    default_backend CHANNEL_LITE
+backend recir_https_www
+    mode tcp
+    server misssv-bau 127.0.0.1:2223 check
+backend LITE
+    mode http
+    server lite-vermilion 127.0.0.1:1010 send-proxy check
+backend GRUP_LITE
+    mode tcp
+    server lite-vermilions 127.0.0.1:1013 send-proxy check
+backend CHANNEL_LITE
+    mode tcp
+    balance roundrobin
+    server y-lite 127.0.0.1:1194 check
+    server lite-x 127.0.0.1:1012 send-proxy check
+backend BOT_LITE
+    mode tcp
+    server xiao-lite 127.0.0.1:2222 check
+backend recir_http
+    mode tcp
+    server loopback-for-http abns@haproxy-http send-proxy-v2 check
+backend recir_https
+    mode tcp
+    server loopback-for-https abns@haproxy-https send-proxy-v2 check
+EOF
+echo -e "${BIWhite}âœ¥Cek konfigurasi HAProxy...${NC}"
+haproxy -c -f /etc/haproxy/haproxy.cfg
+if [ $? -eq 0 ]; then
+    echo -e "${BIWhite}âœ¥Konfigurasi valid. Menyalakan HAProxy...${NC}"
+    systemctl restart haproxy
+    systemctl enable haproxy
+    echo -e "${BIWhite}âœ¥HAProxy berhasil dipasang dan diperbarui!${NC}"
+else
+    echo -e "${BIWhite}âœ¥Konfigurasi tidak valid. Cek file: /etc/haproxy/haproxy.cfg${NC}"
+fi
+systemctl restart haproxy
+print_success "Haproxy"
+}
+function memasang_index_page() {
+  cat <<EOF > /var/www/html/index.html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Di Pencet Ya Kakâ˜ºï¸</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Helvetica Neue', sans-serif;
+      background: linear-gradient(135deg, #e0f7fa, #ffffff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: white;
+      padding: 40px;
+      max-width: 800px;
+      margin: 20px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      color: #333;
+    }
+
+    h1 {
+      text-align: center;
+      color: #00796b;
+      margin-bottom: 30px;
+      font-size: 2em;
+    }
+
+    p {
+      margin-bottom: 20px;
+      line-height: 1.8;
+      font-size: 1.05em;
+    }
+
+    strong {
+      color: #004d40;
+    }
+
+    em {
+      color: #555;
+      font-style: italic;
+    }
+
+    .footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 0.95em;
+      color: #777;
+    }
+
+    @media (max-width: 600px) {
+      .card {
+        padding: 25px;
+      }
+
+      h1 {
+        font-size: 1.5em;
+      }
+
+      p {
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>âš ï¸ WARNING âš ï¸</h1>
+
+    <p><strong>"Ibadah dan pahalamu tidak bisa menyelamatkanmu dari Neraka.</strong><br>
+    Jika kamu bandingkan dengan nikmat yang Allah SWT berikan padamu.</p>
+
+    <p>Lebih besar yang mana?<br>
+    Lebih berat yang mana?</p>
+
+    <p>Saat kamu diciptakan, apakah itu bukan nikmat?<br>
+    Bahkan kematian pun adalah nikmat...!!!</p>
+
+    <p>Semua yang kamu alami adalah nikmat yang Allah SWT berikan untukmu.</p>
+
+    <p>Yang menyelamatkanmu adalah Allah SWT (rahmat-Nya atau disebut kasih sayang-Nya).</p>
+
+    <p>Hanya saja <strong>(berusahalah)</strong> untuk mendapatkan rahmat-Nya.<br>
+    kita harus beribadah, mengerjakan perintah-perintah-Nya dan menjauhi larangan-larangan-Nya.</p>
+
+    <p><strong>Beribadahlah</strong> semata-mata mengharapkan ridho-Nya, rahmat-Nya.</p>
+
+    <p><strong>Oleh sebab itu</strong>, janganlah berpikir ibadah dan pahala-mu bisa membawamu ke Surga dan menyelamatkanmu dari Neraka.</p>
+
+    <p><em>Inilah hal yang selama ini aku temukan dan tanamkan pada diriku.</em></p>
+
+    <p><strong>(Berusahalah semampumu & jika Allah SWT merahmatimu maka nantinya kamu bisa melampaui batasanmu)</strong></p>
+
+    <p>Semoga kita termasuk orang-orang beruntung yang mendapatkan Rahmat dan Kasih Sayang Allah SWT.</p>
+
+    <p><em>Saya bukan ustadz, masih fakir akan ilmu bahkan baca doa Yasinan aja masih lupa dan salah ğŸ˜‚.</em></p>
+
+    <p>Hanya saja aku merasa bahwa pemikiran yang aku tahu ini harus aku bagikan kepada orang lain.</p>
+
+    <div class="footer">
+      Semoga bermanfaat ğŸ™ğŸ™ğŸ™
+      Terima kasih atas sharingnya:<br />
+      <strong>@ahmadsohibulkahfi</strong>
+    </div>
+  </div>
+</body>
+</html>
+EOF
+}
+function mulai_penginstallan(){
+    clear
+    setup_grub_env
+    tampilan
+    mengecek_akses_root
+    memasang_paket_dasar
+    pengaturan_pertama
+    memasang_nginx
+    memasang_folder_xray
+    memasang_domain
+    memasang_ssl
+    memasang_xray
+    memasang_password_ssh
+    memasang_sshd
+    memasang_vnstat
+    memasang_pencadangan
+    memasang_menu
+    memasang_pembatas
+    memasang_fail2ban
+    memasang_netfilter
+    memasang_dropbear
+    memasang_sshws
+    memasang_profile
+    memasang_badvpn
+    memasang_slowdns
+    memasang_udepe
+    memasang_noobz
+    memasang_haproxy
+    memasang_bbr_hybla
+    memasang_index_page
+    memasang_restart
+    memasang_notifikasi_bot
+}
+mulai_penginstallan
+history -c
+rm -rf /root/menu
+rm -rf /root/*.zip
+rm -rf /root/*.sh
+rm -rf /root/LICENSE
+rm -rf /root/README.md
+rm -rf /root/domain
+clear
+secs_to_human "$(($(date +%s) - ${start}))"
+echo -e "${BIWhite}Script Successfully Installed${NC}"
+read -p "$( echo -e "${LIME}Press ${BIWhite}[ ${NC}${ungu}Enter${NC} ${BIWhite}]${LIME} For reboot${NC}") "
+reboot
