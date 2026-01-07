@@ -22,7 +22,7 @@ NC='\033[0m'
 tampilan() {
     local my_ip allowed_ips_url today matched_line exp_date_or_lifetime
 
-    allowed_ips_url="https://raw.githubusercontent.com/haniefautophile-official/link/main/ip"
+    allowed_ips_url="https://raw.githubusercontent.com/haniefautophile-official/link/main/ip
     echo -e "\n${BIWhite}[ ${LIME}INFO${BIWhite} ] Mengecek izin akses...${NC}"
     
     my_ip=$(curl -sS ipv4.icanhazip.com | tr -d '\r')
